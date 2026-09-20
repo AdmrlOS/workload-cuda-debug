@@ -1,0 +1,41 @@
+#!/bin/bash
+set -euo pipefail
+if [[ -d /run/admiral/nvidia/lib ]]; then
+    export LD_LIBRARY_PATH="/run/admiral/nvidia/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+case "${1:-smoke}" in
+    inspect)
+        date -u --iso-8601=seconds
+        uname -a
+        id
+        cat /opt/cuda-debug/build-info.txt
+        printf 'ADMRL_NVIDIA_PROFILE=%s\nLD_LIBRARY_PATH=%s\n' "${ADMRL_NVIDIA_PROFILE:-<unset>}" "${LD_LIBRARY_PATH:-<unset>}"
+        if [[ -r /run/admiral/nvidia/manifest.json ]]; then
+            jq . /run/admiral/nvidia/manifest.json
+        else
+            echo 'MISSING /run/admiral/nvidia/manifest.json'
+        fi
+        echo '--- NVIDIA device nodes (numeric permissions) ---'
+        find /dev -maxdepth 4 \( -name 'nvmap' -o -name 'nvgpu' -o -path '/dev/nvgpu/*' -o -name 'nvhost*' -o -name 'nvidia*' \) -exec ls -ldn {} + 2>/dev/null || true
+        echo '--- Driver files and mount bindings ---'
+        ls -ln /run/admiral/nvidia/lib/ 2>/dev/null || true
+        findmnt -rn -o TARGET,SOURCE,OPTIONS | grep -E 'admiral/nvidia|libcuda|libnvidia' || true
+        echo '--- Loader cache and application dependencies ---'
+        ldconfig -p | grep -E 'libcuda|libnvidia' || true
+        ldd /usr/local/bin/cuda-driver-probe /usr/local/bin/cuda-vector-add
+        echo '--- Memory ---'
+        free -h
+        ;;
+    driver) exec cuda-driver-probe ;;
+    smoke)
+        id
+        cuda-driver-probe
+        cuda-vector-add
+        ;;
+    jit)
+        export CUDA_FORCE_PTX_JIT=1 CUDA_CACHE_DISABLE=1
+        echo 'Testing forced PTX JIT with the cache disabled'
+        exec cuda-vector-add
+        ;;
+    *) echo 'Usage: cuda-debug [inspect|driver|smoke|jit]' >&2; exit 2 ;;
+esac

@@ -1,0 +1,15 @@
+*
+!Dockerfile
+!README.md
+!src/
+!src/**
+!scripts/
+!scripts/**
+!ssh/
+!ssh/authorized_keys
+!ssh/sshd_config
+!llm/
+!llm/Dockerfile
+!llm/README.md
+!llm/start-local-llm
+!llm/serve-local-llm

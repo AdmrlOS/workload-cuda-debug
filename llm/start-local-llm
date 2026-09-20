@@ -1,0 +1,15 @@
+#!/bin/bash
+set -euo pipefail
+mkdir -p /var/log/local-llm
+rm -f /var/log/local-llm/server.exitcode
+chown cuda:cuda /var/log/local-llm
+# The application is a child of tini and runs with the host video GID 28.
+# SSH remains the foreground service even if preflight or the model fails.
+(
+    set +e
+    runuser -u cuda -- /usr/local/bin/serve-local-llm
+    result=$?
+    printf '%s\n' "$result" > /var/log/local-llm/server.exitcode
+    printf 'local-llm exited with status %s; SSH remains available\n' "$result"
+) 2>&1 | tee /var/log/local-llm/server.log &
+exec /usr/local/bin/start-cuda-debug

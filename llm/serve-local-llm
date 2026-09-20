@@ -1,0 +1,29 @@
+#!/bin/bash
+set -euo pipefail
+if [[ -d /run/admiral/nvidia/lib ]]; then
+    export LD_LIBRARY_PATH="/run/admiral/nvidia/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+echo 'local-llm: requiring a successful non-root CUDA kernel test before startup'
+id
+timeout --signal=TERM --kill-after=5 60 cuda-debug smoke
+echo 'local-llm: checking the inference engine sees CUDA0'
+devices=$(timeout --signal=TERM --kill-after=5 30 /opt/llama/bin/llama-server --list-devices 2>&1)
+printf '%s\n' "$devices"
+if ! grep -Eq '^[[:space:]]*CUDA0:' <<< "$devices"; then
+    echo 'FAIL: llama.cpp does not expose CUDA0; refusing CPU fallback' >&2
+    exit 1
+fi
+echo "local-llm: starting Qwen3 1.7B on ${LLM_HOST:-0.0.0.0}:${LLM_PORT:-8080}"
+# Explicit device, layer count and fit=off keep the GPU requirement intentional.
+# This server has no agent tools enabled and performs no model downloads.
+exec /opt/llama/bin/llama-server \
+    --model /opt/llama/models/Qwen3-1.7B-Q4_K_M.gguf \
+    --alias qwen3-1.7b --offline \
+    --host "${LLM_HOST:-0.0.0.0}" --port "${LLM_PORT:-8080}" \
+    --device CUDA0 --n-gpu-layers 99 --fit off \
+    --ctx-size "${LLM_CONTEXT:-2048}" --parallel 1 \
+    --threads "${LLM_THREADS:-4}" --threads-batch "${LLM_THREADS:-4}" \
+    --batch-size 256 --ubatch-size 128 --flash-attn off \
+    --jinja --chat-template-kwargs '{"enable_thinking":false}' --reasoning-budget 0 \
+    --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 \
+    --metrics

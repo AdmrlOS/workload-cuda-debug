@@ -1,0 +1,27 @@
+#!/bin/bash
+set -euo pipefail
+umask 022
+mkdir -p /run/sshd /var/log/cuda-debug
+# Per-userspace host keys; never distribute private host keys in the image.
+ssh-keygen -A
+/usr/sbin/sshd -t
+
+# PAM supplies this to both interactive and noninteractive SSH sessions.
+# Export only the validated profile identifier, never arbitrary inherited env.
+if [[ ${ADMRL_NVIDIA_PROFILE:-} =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    printf 'ADMRL_NVIDIA_PROFILE=%s\n' "$ADMRL_NVIDIA_PROFILE" > /etc/environment
+fi
+# Keep Admiral's injected LD_LIBRARY_PATH on the entry process. SSH can use
+# Admiral's normal /usr/lib bindings; cuda-debug also prepends the payload path.
+if [[ ${CUDA_SMOKE_ON_BOOT:-1} == 1 ]]; then
+    (
+        set +e
+        cuda-debug inspect
+        timeout --signal=TERM --kill-after=5 "${CUDA_SMOKE_TIMEOUT:-60}" cuda-debug smoke
+        status=$?
+        printf '%s\n' "$status" > /var/log/cuda-debug/boot.exitcode
+        printf 'Boot CUDA smoke exit status: %s (SSH remains available)\n' "$status"
+    ) 2>&1 | tee /var/log/cuda-debug/boot.log &
+fi
+echo 'cuda-debug: starting SSH on port 22 (root or cuda; public-key authentication)'
+exec /usr/sbin/sshd -D -e
